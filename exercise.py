@@ -12,14 +12,13 @@ mp_pose = mp.solutions.pose
 
 total_accuracy = []
 total_tilt = []
+accuracy_max = -100
 
 class Bandvent:
     def __init__(self, model, frame):
         self.model = model
         self.frame = frame
         self.comparator = PoseComparator(model, frame)
-
-    ############# 운동 전 자세 확인 #############
     
     def check_foot(self):
         # print("model pose pose landmarks", self.model.pose_landmarks) 
@@ -28,7 +27,6 @@ class Bandvent:
                 self.model.pose_landmarks.landmark[23:33],
                 self.frame.pose_landmarks.landmark[23:33]
             )
-            print("foot state is", foot_state)
             if foot_state > 0.6:
                 network.send_state = 'footcheckend'
             else:
@@ -43,7 +41,6 @@ class Bandvent:
                 self.model.pose_landmarks.landmark,
                 self.frame.pose_landmarks.landmark
             )
-            print("body state is", body_angle_state)
             if body_angle_state > 0.03:
                 network.send_state = 'bodycheckend'
             else:
@@ -57,7 +54,6 @@ class Bandvent:
                 self.model.pose_landmarks.landmark[11:21],
                 self.frame.pose_landmarks.landmark[11:21]
             )
-            print("hand state is", hand_state)
             if hand_state > 0.7:
                 network.send_state = 'handcheckend'
                 time.sleep(0.5)
@@ -66,7 +62,58 @@ class Bandvent:
         else:
             network.send_state = 'notfound'
 
+
+class OneArm:
+    def __init__(self, model, frame):
+        self.model = model
+        self.frame = frame
+        self.comparator = PoseComparator(model, frame)
+        
+    def check_arm(self):
+        print("check arm start")
+        if self.frame.pose_landmarks is not None:
+            arm_state = self.comparator.return_similarity(
+                self.model.pose_landmarks.landmark[11:17],
+                self.frame.pose_landmarks.landmark[11:17]
+            )
+            if arm_state > 0.5:
+                network.send_state = 'armcheckend'
+            else:
+                network.send_state = 'standby'
+                
+        else:
+            network.send_state = 'notfound'
             
+class DumbelFront:
+    def __init__(self, model, frame):
+        self.model = model
+        self.frame = frame
+        self.comparator = PoseComparator(model, frame)
+        
+    def check_arm(self):
+        print("check arm start")
+        if self.frame.pose_landmarks is not None:
+            arm_state = self.comparator.return_similarity(
+                self.model.pose_landmarks.landmark[11:17],
+                self.frame.pose_landmarks.landmark[11:17]
+            )
+            print("arm state is >>>", arm_state)
+            if arm_state > 0.5:
+                network.send_state = 'armcheckend'
+            else:
+                network.send_state = 'standby'
+                
+        else:
+            network.send_state = 'notfound'
+       
+       
+class Run:
+    def __init__(self, model, frame, frameimg):
+        self.model = model
+        self.frame = frame
+        self.frameimg = frameimg
+        self.comparator = PoseComparator(model, frame)
+    
     ############# 운동 중 축 확인 #############
     
     def tilt_check(self): # 운동 중 확인
@@ -99,6 +146,8 @@ class Bandvent:
             
     def accuracy_check(self):
         global total_accuracy
+        global accuracy_max
+        
         if self.frame.pose_landmarks is None or self.model.pose_landmarks is None:
             print("Error: Pose landmarks not detected.")
             return "e"  # Default or error state
@@ -111,14 +160,29 @@ class Bandvent:
             frame_landmarks[11:33]
         )
         accuracy = accuracy * 100
+        accuracy = 70 + (accuracy - 50) / 2 # scaling
         accuracy = int(accuracy)
         total_accuracy.append(accuracy)
+        
+        if accuracy > accuracy_max:
+            accuracy_max = accuracy
+            cv.imwrite('/home/pi/HELPT/topaccuracy.jpg', self.frameimg)
+            
         return str(accuracy)
 
-    def make_report():
+    def combined_check(self):
+        tilt_state = self.tilt_check()
+        accuracy_state = self.accuracy_check()
+        if tilt_state == 'e' or accuracy_state == 'e':
+            return "notfound"
+        return tilt_state + accuracy_state
+    
+    def make_report(self):
         average_accuracy = sum(total_accuracy) / len(total_accuracy)
-        counter = Counter(average_tilt)
+        average_accuracy = int(average_accuracy)
+        counter = Counter(total_tilt)
         # 가장 카운트가 많은 값을 찾음
         most_common_value, most_common_count = counter.most_common(1)[0]
-        
-        return
+        end_state = most_common_value + str(average_accuracy)
+        return end_state
+

@@ -1,15 +1,16 @@
 import socket
 import sports
+import camera
 import constant
 import threading
 import time
-
+import cv2 as cv
 rec_state = ""
 send_state = ""
 
-HOST = "172.20.10.2"
+HOST = "192.168.79.195"
 # Enter IP or Hostname of your server
-PORT = 8000
+PORT = 7021
 
 code = ""
 msg = ""
@@ -32,6 +33,10 @@ def receive():
     global code, client_socket, addr, rec_state  
     while True:
         rec_state = client_socket.recv(1024).decode('utf-8')
+        if rec_state == 'onearm' or rec_state == 'bandvent' or rec_state == 'dumbelfront':
+            camera.sports = rec_state
+        else:
+            camera.state = rec_state
         time.sleep(1)
 
  
@@ -39,10 +44,8 @@ def send():
     global msg, client_socket, send_state
     
     while True:
-        # if state~~ == ~~: msg = "1"
         timer = 1
         flag = 0
-        print("send", send_state)
         if send_state == 'footcheckend' and flag == 0:
             msg = 'a'
             flag = 1
@@ -55,7 +58,7 @@ def send():
             msg = 'c'
             flag = 3
             client_socket.send(msg.encode())
-        elif send_state == 'bandventalldone' and flag == 3:
+        elif send_state == 'alldone' and flag == 3:
             msg = 'd'
             flag = 4
             client_socket.send(msg.encode())
@@ -65,12 +68,20 @@ def send():
         elif send_state == 'standby':
             msg = 'f'
             client_socket.send(msg.encode())
+        elif send_state == 'checkend':
+            msg = 'g'
+            client_socket.send(msg.encode())
+        elif send_state == 'Done':
+            msg = 'h'
+            client_socket.send(msg.encode())
+        elif send_state == None:
+            continue
         else:
             msg = send_state
             client_socket.send(msg.encode())
         
         time.sleep(timer)
-
+        
 
 def close():
     global rt, st

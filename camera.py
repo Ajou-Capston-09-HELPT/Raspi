@@ -1,6 +1,6 @@
 import cv2 as cv
 import mediapipe as mp
-from exercise import Bandvent
+from exercise import Bandvent, OneArm, Run, DumbelFront
 import time
 import network
 import numpy as np
@@ -8,130 +8,178 @@ import numpy as np
 mp_pose = mp.solutions.pose
 
 flag = 0
+sports = None
+state = None
+
+def initialize_camera():
+    camera = cv.VideoCapture(0)
+    if not camera.isOpened():
+        print("Error: Could not open camera.")
+        return None
+    # ret = camera.set(cv.CAP_PROP_FRAME_WIDTH, 640)
+    # ret = camera.set(cv.CAP_PROP_FRAME_HEIGHT, 360)
+    return camera
+
+def process_model_image(pose, model_path):
+    model = cv.imread(model_path)
+    if model is None:
+        print(f"Error: Could not read model image at {model_path}.")
+        return None
+    model = cv.resize(model, (640, 360))
+    model_frame = cv.cvtColor(model, cv.COLOR_BGR2RGB)
+    return pose.process(model_frame)
+
+def process_frame(pose, frame):
+    rgb_frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+    return pose.process(rgb_frame)
+
+def overlay_text(frame, text, position=(10, 30)):
+    cv.putText(frame, text, position, cv.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv.LINE_AA)
+
+def run_pose_detection(camera, pose, sports, model_path):
+    model = process_model_image(pose, model_path)
+    if model is None:
+        return
+
+    while True:
+        ret, frame = camera.read()
+        if not ret:
+            print("Error: Could not read frame from camera.")
+            break
+
+        print(">>>>send state is", network.send_state)
+        frame = cv.flip(frame, 0)
+        
+        # 오버레이 텍스트 추가
+        overlay_text(frame, f"State: {network.send_state}", (10, 30))
+
+        cv.imshow('frame', frame)
+        if cv.waitKey(1) & 0xFF == ord('q'):
+            break
+
+        frame = process_frame(pose, frame)
+        if sports == 'bandvent':
+            instance = Bandvent(model=model, frame=frame)
+            if state == 'checkstart':
+                instance.check_foot()
+            elif state == 'bodycheckstart':
+                instance.check_body_angle()
+            elif state == 'handcheckstart':
+                instance.check_hand()
+            if network.send_state == 'handcheckend':
+                network.send_state = 'checkend'
+                time.sleep(0.3)
+                break
+        elif sports == 'onearm':
+            instance = OneArm(model=model, frame=frame)
+            if state == 'checkstart':
+                instance.check_arm()
+            if network.send_state == 'armcheckend':
+                network.send_state = 'checkend'
+                print(">>>>>>>checkend")
+                time.sleep(0.3)
+                break
+            
+        elif sports == 'dumbelfront':
+            instance = DumbelFront(model=model, frame=frame)
+            if state == 'checkstart':
+                instance.check_arm()
+            if network.send_state == 'armcheckend':
+                network.send_state = 'checkend'
+                print(">>>>>>>checkend")
+                time.sleep(0.3)
+                break
+            
+        else:
+            break
+
+        time.sleep(0.2)
+
+    cv.destroyAllWindows()
+    camera.release()
 
 def pose_detect():
-    fps = 5  # 2fps로 설정
-    
     try:
-        camera = cv.VideoCapture(0)
-        if not camera.isOpened():
-            print("Error: Could not open camera.")
+        camera = initialize_camera()
+        if camera is None:
             return
         
-        ret = camera.set(cv.CAP_PROP_FRAME_WIDTH, 640)
-        ret = camera.set(cv.CAP_PROP_FRAME_HEIGHT, 360)
-        
         with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
-            model = cv.imread('/home/pi/HELPT/sample_shot/bandvent/frame/frame_0.jpg')
-            if model is None:
-                print("Error: Could not read model image.")
-                return
-
-            model = cv.resize(model, (640, 360))
-            model_frame = cv.cvtColor(model, cv.COLOR_BGR2RGB)
-            model = pose.process(model_frame)
+            model_path = f'/home/pi/HELPT/sample_shot/{sports}/frame/frame_0.jpg'
+            run_pose_detection(camera, pose, sports, model_path)
             
-            while True:
-                ret, frame = camera.read()
-                if not ret:
-                    print("Error: Could not read frame from camera.")
-                    break  # No more frames, break
-                
-                print(">>>>send state is", network.send_state)
-                frame = cv.resize(frame, (640, 360))
-                frame = cv.flip(frame, 0)  # Flip horizontally instead of vertically
-                cv.imshow('frame', frame)
-                if cv.waitKey(1) & 0xFF == ord('q'):  # Add a way to exit the loop
-                    break
 
-                rgb_frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-                frame = pose.process(rgb_frame)
-
-                bandvent_instance = Bandvent(model=model, frame=frame)
-
-                if network.rec_state == 'bandventcheckstart':
-                    bandvent_instance.check_foot()
-                elif network.rec_state == 'bodycheckstart':
-                    bandvent_instance.check_body_angle()
-                elif network.rec_state == 'handcheckstart':
-                    bandvent_instance.check_hand()
-                elif network.send_state == 'handcheckend':
-                    print("<<<<break>>>")
-                    break
-                else:
-                    continue
-                
-                time.sleep(1/fps)  # Adjust sleep time for fps
-
-            cv.destroyAllWindows()
-            camera.release()
     except KeyboardInterrupt:
         print(">>>>>>>>>>>>>>>>>>>>>>>>Camera interrupt")
 
 def exercise_detect():
-    fps = 2  # 2fps로 설정
-    
-    frame_counter = -1
     try:
-        camera = cv.VideoCapture(0)
-        print(">>>>>>>exercise detect start>>>>>>>")
-        if not camera.isOpened():
-            print("Error: Could not open camera.")
+        camera = initialize_camera()
+        if camera is None:
             return
         
-        ret = camera.set(cv.CAP_PROP_FRAME_WIDTH, 640)
-        ret = camera.set(cv.CAP_PROP_FRAME_HEIGHT, 360)
-        
-        with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
-            start_time = time.time()
+        frame_counter = -1
 
+        with mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5) as pose:
             while True:
                 ret, frame = camera.read()
                 frame_counter = frame_counter + 1
                 if not ret:
                     print("Error: Could not read frame from camera.")
-                    break  # No more frames, break
-                
-                frame = cv.resize(frame, (640, 360))
-                frame = cv.flip(frame, 0)  # Flip horizontally instead of vertically
-                # cv.imshow('frame', frame)
-                if cv.waitKey(1) & 0xFF == ord('q'):  # Add a way to exit the loop
                     break
 
-                rgb_frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-                frame = pose.process(rgb_frame)
+                frame = cv.resize(frame, (640, 360))
+                frame = cv.flip(frame, 0)
                 
-                model_path = f'/home/pi/HELPT/sample_shot/bandvent/frame/frame_{frame_counter}.jpg'
+                # 오버레이 텍스트 추가
+                overlay_text(frame, f"Frame: {frame_counter}", (10, 30))
+                overlay_text(frame, f"State: {network.send_state}", (10, 60))
+
+                cv.imshow('frame', frame)
+                image_frame = frame
+                if cv.waitKey(1) & 0xFF == ord('q'):
+                    break
+
+                frame = process_frame(pose, frame)
+            
+                model_path = f'/home/pi/HELPT/sample_shot/{sports}/frame/frame_{frame_counter}.jpg'
+
                 model = cv.imread(model_path)
                 
                 if model is None:
-                    print(f"Error: Could not read model image at {model_path}.")
-                    break
-            
-                model = cv.resize(model, (640, 360))
-                cv.imshow('model', model)
-                rgb_model_frame = cv.cvtColor(model, cv.COLOR_BGR2RGB)
-                model = pose.process(rgb_model_frame)
-                
-                bandvent_instance = Bandvent(model=model, frame=frame)
+                    print("Error: Could not read model image.")
+                    return
 
-                if network.rec_state == 'bandventrunstart':
-                    tilt_state = bandvent_instance.tilt_check()
-                    accuracy = bandvent_instance.accuracy_check()
-                    if tilt_state == "e" or accuracy == "e":
-                        network.send_state = 'notfound'
-                    else:
-                        network.send_state = tilt_state + accuracy
+                model = cv.resize(model, (640, 360))
+                model_frame = cv.cvtColor(model, cv.COLOR_BGR2RGB)
+                model = pose.process(model_frame)
                 
-                if network.rec_state == 'bandventend':
-                    network.send_state = 'bandventalldone'
+                if model != None:
+
+                    if state == 'runstart':
+                        run_instance = Run(model=model, frame=frame, frameimg = image_frame)
+                        network.send_state = run_instance.combined_check()
+                        if network.send_state[0] == 'n':
+                            time.sleep(1)
+
+                    if state == 'end':
+                        report = run_instance.make_report()
+                        network.send_state = 'd' + report
+                        print(network.send_state)
+                        time.sleep(0.5)
+                        break
+
+                    print("frame counter", frame_counter, "network send", network.send_state)
+                    if frame_counter == 5:
+                        frame_counter = 0
+                        
+                elif sports == None:
+                    continue
+                
+                if model is None:
                     break
-                
-                print("frame counter", frame_counter, "network send", network.send_state)
-                if frame_counter == 5:
-                    frame_counter = 0
-                    
-                time.sleep(1)
+
+                time.sleep(0.5)
 
             cv.destroyAllWindows()
             camera.release()
@@ -139,17 +187,17 @@ def exercise_detect():
         print(">>>>>>>>>>>>>>>>>>>>>>>>Camera interrupt")
 
 def main():
-    global flag
-    print(">>>>>>>main>>>>>>>>")
+    global flag, state
     while True:
-        if network.rec_state == 'bandventcheckstart' and flag == 0:
-            print("pose detect")
+        if sports == 'bandvent' or sports == 'onearm' or sports == 'dumbelfront':
             flag = 1
+        if state == 'checkstart' and flag == 1:
             pose_detect()
-            print("pose detect end")
-        if network.rec_state == 'bandventrunstart':
-            print("exercise detect")
+            flag = 2
+            state = None
+        elif state == 'runstart':
             exercise_detect()
+            state = None
         time.sleep(0.1)
 
 if __name__ == "__main__":
